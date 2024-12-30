@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 set -eu
 
@@ -11,7 +11,7 @@ set +u
 if [ -n "$REMOTE_LOG" ]; then
   LOG_FILE="$REMOTE_LOG"
 else
-  LOG_FILE=/tmp/set_ssh_port.log
+  LOG_FILE=/tmp/create_vpn_client.log
 fi
 set -u
 rm -rf "$LOG_FILE" && touch "$LOG_FILE" && chmod 777 "$LOG_FILE"
@@ -59,33 +59,27 @@ check_variables_availability() {
 
 log_info_highlighted "Check arguments..."
 if [ $# -eq 0 ]; then
-    raise_error "No arguments provided. The following are expected: PORT"
+    raise_error "No arguments provided. The following are expected: CLIENT_NAME"
 fi
 
-PORT="$1"
+CLIENT_NAME="$1"
 
-log_info_highlighted "Check variables availability..."
-FAILURES=$(check_variables_availability PORT)
+log_info_pretty "Check variables availability"
+FAILURES=$(check_variables_availability CLIENT_NAME)
 if [ -n "$FAILURES" ]; then
     raise_error "Missing variables: $FAILURES"
 fi
 
-log_info_highlighted "Check port number..."
-if [[ ! $PORT =~ ^[0-9]+$ ]] ; then
-    raise_error "Specified port $PORT contains prohibited symbols."
+if ! sudo -f  /etc/openvpn/easy-rsa/easyrsa ; then
+  raise_error "Required /etc/openvpn/easy-rsa/easyrsa file is not exists."
 fi
 
-log_info_highlighted "Check port accessibility..."
-if sudo netstat -anp | grep -q "$PORT" ; then
-  raise_error "Specified port $PORT is already in use."
+cd /etc/openvpn/easy-rsa
+
+sudo ./easyrsa revoke "$CLIENT_NAME" | sudo tee -a "$LOG_FILE" 2>&1
+sudo ./easyrsa gen-crl | sudo tee -a "$LOG_FILE" 2>&1
+if ! grep -q "An updated CRL has been created:" "$LOG_FILE"; then
+  raise_error "CRL file is not created."
 fi
 
-if sudo grep -Pq "^Port " /etc/ssh/sshd_config; then
-  sudo sed -i -E "s/^Port .*/Port $PORT/g" /etc/ssh/sshd_config
-elif sudo grep -Pq "^#Port " /etc/ssh/sshd_config; then
-  sudo sed -i -E "s/^#Port .*/Port $PORT/g" /etc/ssh/sshd_config
-else
-  echo "Port $PORT" >> /etc/ssh/sshd_config
-fi
-
-sudo systemctl restart sshd
+sudo cp pki/crl.pem /etc/openvpn/server/ | sudo tee -a "$LOG_FILE" 2>&1
