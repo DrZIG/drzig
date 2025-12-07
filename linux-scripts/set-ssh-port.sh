@@ -57,6 +57,10 @@ check_variables_availability() {
   echo "$NOT_AVAILABLE"
 }
 
+print_help() {
+  echo "Usage: ./set-ssh-port.sh \$PORT"
+}
+
 log_info_highlighted "Check arguments..."
 if [ $# -eq 0 ]; then
     raise_error "No arguments provided. The following are expected: PORT"

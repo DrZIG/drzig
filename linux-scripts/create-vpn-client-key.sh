@@ -17,6 +17,7 @@ set -u
 rm -rf "$LOG_FILE" && touch "$LOG_FILE" && chmod 777 "$LOG_FILE"
 
 log_info() {
+  printf "$(date +"%Y-%m-%d %H:%M:%S,%3N")\t%s\n" "$1"
   printf "$(date +"%Y-%m-%d %H:%M:%S,%3N")\t%s\n" "$1" >> "$LOG_FILE"
 }
 
@@ -57,9 +58,32 @@ check_variables_availability() {
   echo "$NOT_AVAILABLE"
 }
 
+print_help() {
+  echo "Usage: $0 [-h] SERVER CLIENT_NAME"
+  echo "Options:"
+  echo " -h                   - (Optional) print help"
+  echo " SERVER               - (Required) set a server name. E.g. 'vpn.drzig.info'"
+  echo " CLIENT_NAME          - (Required) client name, different for each client. E.g. client01"
+}
+
+IS_HELP=false
+while getopts ":h" val
+do
+  case "$val" in
+    h) IS_HELP=true ;;
+    *) echo "usage: $0 [-h]" >&2
+       exit 1 ;;
+  esac
+done
+
+if $IS_HELP ; then
+  print_help
+  exit 0
+fi
+
 log_info_highlighted "Check arguments..."
 if [ $# -eq 0 ]; then
-    raise_error "No arguments provided. The following are expected: CLIENT_NAME"
+    raise_error "No arguments provided. The following are expected: SERVER CLIENT_NAME"
 fi
 
 SERVER="$1"
@@ -69,10 +93,10 @@ FOLDER_WITH_RESULTS=/data/yandex.disk/bluevps
 log_info_pretty "Check variables availability"
 FAILURES=$(check_variables_availability SERVER CLIENT_NAME)
 if [ -n "$FAILURES" ]; then
-    raise_error "Missing variables: $FAILURES"
+  raise_error "Missing variables: $FAILURES"
 fi
 
-if ! sudo -f  /etc/openvpn/easy-rsa/easyrsa ; then
+if [ ! -f /etc/openvpn/easy-rsa/easyrsa ] ; then
   raise_error "Required /etc/openvpn/easy-rsa/easyrsa file is not exists."
 fi
 
@@ -129,4 +153,11 @@ EOT
 
 cd /etc/openvpn/
 sudo zip -r -j "$CLIENT_NAME.zip" client/*
-sudo cp "$CLIENT_NAME.zip" $FOLDER_WITH_RESULTS/
+
+if sudo ls $FOLDER_WITH_RESULTS 2> /dev/null ; then
+  sudo cp "$CLIENT_NAME.zip" $FOLDER_WITH_RESULTS/
+  log_info_highlighted "Directory with open-vpn client: $FOLDER_WITH_RESULTS"
+else
+  log_info_highlighted "Directory with open-vpn client: $PWD"
+fi
+

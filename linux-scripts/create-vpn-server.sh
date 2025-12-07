@@ -57,6 +57,27 @@ check_variables_availability() {
   echo "$NOT_AVAILABLE"
 }
 
+print_help() {
+  echo "Usage: $0 [-h]"
+  echo "Options:"
+  echo " -h                   - (Optional) print help"
+}
+
+IS_HELP=false
+while getopts ":h" val
+do
+  case "$val" in
+    h) IS_HELP=true ;;
+    *) echo "usage: $0 [-h]" >&2
+       exit 1 ;;
+  esac
+done
+
+if $IS_HELP ; then
+  print_help
+  exit 0
+fi
+
 SERVER_NAME=drzig-server
 
 log_info_pretty "Check variables availability"
@@ -65,9 +86,9 @@ if [ -n "$FAILURES" ]; then
     raise_error "Missing variables: $FAILURES"
 fi
 
-which openvpn > /dev/null 2>&1 || log_info_pretty "Install openvpn" && sudo yum install openvpn -yq | sudo tee -a "$LOG_FILE" 2>&1
+which openvpn > /dev/null 2>&1 || log_info_pretty "Install openvpn" && sudo yum install openvpn -y | sudo tee -a "$LOG_FILE" 2>&1
 if ! sudo ls /usr/share/easy-rsa > /dev/null 2>&1; then
-  log_info_pretty "Install easy-rsa" && sudo yum install easy-rsa -yq
+  log_info_pretty "Install easy-rsa" && sudo yum install easy-rsa -y
 fi
 
 EASY_RSA_SOURCE=
@@ -168,7 +189,7 @@ key /etc/openvpn/server/$SERVER_NAME.key
 
 #DH and CRL key
 dh /etc/openvpn/server/dh.pem
-crl-verify /etc/openvpn/server/crl.pem
+#crl-verify /etc/openvpn/server/crl.pem
 
 # Network Configuration - Internal network
 # Redirect all Connection through OpenVPN Server
