@@ -1,95 +1,107 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -eu
+set -e
 
-if [ ! "$(uname -s)" = "Linux" ]; then
-  echo "ERROR: This script is for Linux use only"
-  exit 1
-fi
+PROG=$(basename $0)
+CURRENT_SCRIPT_DIRECTORY=$(dirname "$(realpath "$0")")
 
-set +u
-if [ -n "$REMOTE_LOG" ]; then
-  LOG_FILE="$REMOTE_LOG"
-else
-  LOG_FILE=/tmp/set_ssh_port.log
-fi
-set -u
-rm -rf "$LOG_FILE" && touch "$LOG_FILE" && chmod 777 "$LOG_FILE"
+source "$CURRENT_SCRIPT_DIRECTORY"/common/init.sh
 
-log_info() {
-  printf "$(date +"%Y-%m-%d %H:%M:%S,%3N")\t%s\n" "$1" >> "$LOG_FILE"
+# Define script variables
+#set +u
+#set -u
+usage()
+{
+ cat << EOF
+
+  Script to set port for ssh connection.
+
+  USAGE: $ ./${PROG} [OPTIONS]
+
+  OPTIONS:
+
+    -h               - Help usage
+    -p, --port=PORT  - Specific port to use for ssh connection. Can be set using PORT environment variable.
+                       Example: "22"
+
+  EXAMPLES:
+
+    * Show this help message
+
+      $ ./${PROG} -h
+
+    * Set port 22
+
+      $ ./${PROG} --port=22
+
+EOF
 }
 
-log_info_highlighted() {
-  printf "#####$(date +"%Y-%m-%d %H:%M:%S,%3N")\t%s\n" "$1" >> "$LOG_FILE"
-}
+log_info_pretty "Parse script parameters"
+VALID_ARGS=$(getopt -o hp: --long help,port: -- "$@")
+eval set -- "$VALID_ARGS"
 
-log_info_pretty() {
-  printf "\n#######################################\n$(date +"%Y-%m-%d %H:%M:%S,%3N")\t%s\n#######################################\n" "$1" >> "$LOG_FILE"
-}
+while true; do
+    case "$1" in
+        -h | --help)
+            log_info "Found '-h (help)' option"
+            usage
+            exit 0
+            ;;
+        -p | --port)
+            log_info "Found '-p (port)' argument."
+            PORT="$2"
+            shift 2  # Shift past the option and its argument
+            ;;
+        --) # End of options marker
+            shift
+            break
+            ;;
+        *) log_info "Found unrecognized option '$1'"
+            usage
+            exit 1
+            ;;
+    esac
+done
 
-raise_error() {
-  echo "ERROR: $*"
-  printf "$(date +"%Y-%m-%d %H:%M:%S,%3N")\tERROR: %s\n" "$*" >> "$LOG_FILE"
-  exit 1
-}
+check_variables_availability PORT
 
-TEMP_DIR=$(mktemp -d)
-sudo chmod +r+x "$TEMP_DIR"
-clean_environment() {
-  rm -rf "$TEMP_DIR";
-  echo "Log file path: $LOG_FILE"
-}
-trap clean_environment EXIT
+log_info_pretty "Script parameters:"
+log_info "PORT=$PORT"
 
-check_variables_availability() {
-  NOT_AVAILABLE=
-  set +u
-  # shellcheck disable=SC2048
-  for SINGLE_VARIABLE in $*; do
-    eval RESULT="\${$SINGLE_VARIABLE}" >> "$LOG_FILE" 2>&1
-    if [ -z "$RESULT" ]; then
-        NOT_AVAILABLE="$NOT_AVAILABLE $SINGLE_VARIABLE"
-    fi
-  done
-  set -u
-
-  echo "$NOT_AVAILABLE"
-}
-
-print_help() {
-  echo "Usage: ./set-ssh-port.sh \$PORT"
-}
-
-log_info_highlighted "Check arguments..."
-if [ $# -eq 0 ]; then
-    raise_error "No arguments provided. The following are expected: PORT"
-fi
-
-PORT="$1"
-
-log_info_highlighted "Check variables availability..."
-FAILURES=$(check_variables_availability PORT)
-if [ -n "$FAILURES" ]; then
-    raise_error "Missing variables: $FAILURES"
-fi
-
-log_info_highlighted "Check port number..."
+log_info_pretty "Check port number..."
 if [[ ! $PORT =~ ^[0-9]+$ ]] ; then
     raise_error "Specified port $PORT contains prohibited symbols."
 fi
 
-log_info_highlighted "Check port accessibility..."
+log_info_pretty "Check port accessibility..."
 if sudo netstat -anp | grep -q "$PORT" ; then
   raise_error "Specified port $PORT is already in use."
 fi
 
-if sudo grep -Pq "^Port " /etc/ssh/sshd_config; then
-  sudo sed -i -E "s/^Port .*/Port $PORT/g" /etc/ssh/sshd_config
-elif sudo grep -Pq "^#Port " /etc/ssh/sshd_config; then
-  sudo sed -i -E "s/^#Port .*/Port $PORT/g" /etc/ssh/sshd_config
+if [[ "$OS_NAME" == "Ubuntu" ]] && (( ${OS_VERSION%%.*} >= 24 )); then
+  log_info "Ubuntu version greater than 24. Use ssh.socket service"
+  sudo mkdir -p /etc/systemd/system/ssh.socket.d
+  cat >/etc/systemd/system/ssh.socket.d/listen.conf <<EOF
+[Socket]
+ListenStream=
+ListenStream=$PORT
+EOF
+  sudo systemctl daemon-reload
+  sudo systemctl restart ssh.socket
 else
-  echo "Port $PORT" >> /etc/ssh/sshd_config
-fi
+  log_info "Update sshd service service"
+  if sudo grep -Pq "^Port " /etc/ssh/sshd_config; then
+    log_info "'Port' setting is found in /etc/ssh/sshd_config"
+    sudo sed -i -E "s/^Port .*/Port $PORT/g" /etc/ssh/sshd_config
+  elif sudo grep -Pq "^#Port " /etc/ssh/sshd_config; then
+    log_info "Commented 'Port' setting is found in /etc/ssh/sshd_config"
+    sudo sed -i -E "s/^#Port .*/Port $PORT/g" /etc/ssh/sshd_config
+  else
+    log_info "Port setting is NOT found in /etc/ssh/sshd_config"
+    echo "Port $PORT" >> /etc/ssh/sshd_config
+  fi
 
-sudo systemctl restart sshd
+  sudo systemctl restart sshd
+fi
+log_info_pretty "Port was updated successfully."
